@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>技术指标分析 - RSI/MACD/布林带</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:#f0f2f5;color:#2c3e50;min-height:100vh}
+.header{background:linear-gradient(135deg,#1a1a2e,#16213e);color:#fff;padding:18px 28px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.header h1{font-size:20px;font-weight:500}
+.upload-zone{background:#fff;border:2px dashed #ccc;border-radius:12px;padding:32px;text-align:center;margin:24px auto;max-width:600px;cursor:pointer;transition:border-color .2s}
+.upload-zone:hover{border-color:#534AB7}
+.upload-zone.dragover{border-color:#534AB7;background:#EEEDFE}
+.upload-zone .icon{font-size:40px;margin-bottom:12px;opacity:.5}
+.upload-zone p{color:#888;font-size:13px;margin-top:4px}
+.upload-zone button{margin-top:12px;background:#534AB7;color:#fff;border:none;padding:8px 24px;border-radius:6px;font-size:14px;cursor:pointer}
+#fileInput{display:none}
+.stats-bar{display:flex;gap:16px;flex-wrap:wrap;padding:16px 28px;max-width:1400px;margin:0 auto}
+.stat-card{background:#fff;border-radius:8px;padding:12px 18px;box-shadow:0 1px 4px rgba(0,0,0,.06);flex:1;min-width:100px;text-align:center}
+.stat-card .v{font-size:20px;font-weight:500}
+.stat-card .l{font-size:11px;color:#888;margin-top:2px}
+.v.up{color:#e74c3c}.v.down{color:#27ae60}
+.container{max-width:1400px;margin:0 auto;padding:0 20px 40px}
+.chart-card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.05);margin-bottom:12px;overflow:hidden}
+.chart-card .hd{padding:14px 20px;font-size:14px;font-weight:500;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center}
+.chart-card .hd .badge{font-size:11px;color:#888;background:#f5f5f5;padding:2px 10px;border-radius:10px}
+.chart-row{display:flex;gap:12px}
+.chart-row .chart-card{flex:1}
+.chart-wrap{width:100%}
+.chart-wrap.kline{height:520px}
+.chart-wrap.sub{height:180px}
+.legend{display:flex;gap:16px;font-size:11px;color:#999;padding:0 20px 10px}
+.legend .d{width:8px;height:8px;border-radius:50%;display:inline-block}
+.legend span{display:flex;align-items:center;gap:4px}
+.empty-state{text-align:center;padding:80px 20px;color:#aaa}
+@media(max-width:768px){
+  .chart-row{flex-direction:column}
+  .chart-wrap.kline{height:360px}
+  .chart-wrap.sub{height:150px}
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>技术指标分析工具</h1>
+  <span style="font-size:13px;color:#a0aec0">RSI · MACD · 布林带 — 上传CSV即用</span>
+</div>
+
+<div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+  <div class="icon">📁</div>
+  <div style="font-size:15px;font-weight:500">点击上传或拖拽 CSV 文件</div>
+  <p>支持列: date, open, high, low, close, volume, amount</p>
+  <button>选择文件</button>
+  <input type="file" id="fileInput" accept=".csv" onchange="handleFile(this.files[0])">
+</div>
+
+<div class="stats-bar" id="statsBar" style="display:none"></div>
+
+<div class="container" id="chartsContainer" style="display:none">
+  <div class="chart-card">
+    <div class="hd"><span>K线图 + 布林带</span><span class="badge" id="rangeBadge"></span></div>
+    <div class="legend">
+      <span><span class="d" style="background:#ffc107"></span>中轨</span>
+      <span><span class="d" style="background:#ccc"></span>上下轨</span>
+    </div>
+    <div class="chart-wrap kline" id="chartKline"></div>
+  </div>
+
+  <div class="chart-row">
+    <div class="chart-card" style="flex:1">
+      <div class="hd"><span>成交量</span><span class="badge">手</span></div>
+      <div class="chart-wrap sub" id="chartVol"></div>
+    </div>
+    <div class="chart-card" style="flex:1">
+      <div class="hd"><span>MACD (12, 26, 9)</span></div>
+      <div class="chart-wrap sub" id="chartMacd"></div>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <div class="hd"><span>RSI (14)</span></div>
+    <div class="chart-wrap sub" id="chartRsi"></div>
+  </div>
+</div>
+
+<div class="empty-state" id="emptyState">上传 CSV 文件以开始分析</div>
+
+<script>
+// Global state
+var rawData = [];
+
+function handleFile(file) {
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    parseCSV(e.target.result);
+  };
+  reader.readAsText(file);
+}
+
+function parseCSV(text) {
+  var lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) { alert('CSV 文件格式错误'); return; }
+
+  var headers = lines[0].split(',');
+  var idx = {};
+  ['date','open','high','low','close','volume','amount'].forEach(function(k){
+    idx[k] = headers.indexOf(k);
+    if (idx[k] < 0 && ['date','close'].indexOf(k) >= 0) {
+      alert('CSV 缺少必要列: ' + k);
+      return;
+    }
+  });
+
+  rawData = [];
+  for (var i = 1; i < lines.length; i++) {
+    var cols = lines[i].split(',');
+    if (cols.length < 5) continue;
+    var r = {};
+    r.date = cols[idx.date].trim();
+    r.open = parseFloat(cols[idx.open]) || 0;
+    r.high = parseFloat(cols[idx.high]) || 0;
+    r.low  = parseFloat(cols[idx.low])  || 0;
+    r.close= parseFloat(cols[idx.close])|| 0;
+    r.volume = parseInt(cols[idx.volume]) || 0;
+    r.amount = parseInt(cols[idx.amount]) || 0;
+    rawData.push(r);
+  }
+
+  if (rawData.length < 15) { alert('数据点不足，至少需要 15 条'); return; }
+
+  // Show stats
+  var f = rawData[0], l = rawData[rawData.length-1];
+  var chg = ((l.close - f.close) / f.close * 100);
+  var maxP = -Infinity, minP = Infinity;
+  rawData.forEach(function(r){ if(r.high>maxP)maxP=r.high; if(r.low<minP)minP=r.low; });
+  var cls = chg >= 0 ? 'up' : 'down', sg = chg >= 0 ? '+' : '';
+
+  document.getElementById('statsBar').style.display = 'flex';
+  document.getElementById('statsBar').innerHTML =
+    '<div class="stat-card"><div class="l">收盘价</div><div class="v '+cls+'">'+l.close.toFixed(2)+'</div></div>'+
+    '<div class="stat-card"><div class="l">涨跌幅</div><div class="v '+cls+'">'+sg+chg.toFixed(2)+'%</div></div>'+
+    '<div class="stat-card"><div class="l">最高</div><div class="v">'+maxP.toFixed(2)+'</div></div>'+
+    '<div class="stat-card"><div class="l">最低</div><div class="v">'+minP.toFixed(2)+'</div></div>'+
+    '<div class="stat-card"><div class="l">交易日</div><div class="v">'+rawData.length+'</div></div>';
+  document.getElementById('rangeBadge').textContent = rawData[0].date + ' ~ ' + l.date;
+  document.getElementById('chartsContainer').style.display = 'block';
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('uploadZone').style.display = 'none';
+
+  renderAll();
+}
+
+// ===== indicators =====
+function calcRSI(closes, period) {
+  var r=[], g=[], l=[], n=closes.length;
+  for(var i=1;i<n;i++){ var d=closes[i]-closes[i-1]; g.push(d>0?d:0); l.push(d<0?-d:0); }
+  var ag=0,al=0; for(var i=0;i<period;i++){ag+=g[i];al+=l[i];} ag/=period; al/=period;
+  r.push(al===0?100:+(100-100/(1+ag/al)).toFixed(2));
+  for(var i=period;i<g.length;i++){ag=(ag*(period-1)+g[i])/period;al=(al*(period-1)+l[i])/period;r.push(al===0?100:+(100-100/(1+ag/al)).toFixed(2));}
+  return r;
+}
+
+function calcEMA(arr, period) {
+  var k=2/(period+1), r=[arr[0]];
+  for(var i=1;i<arr.length;i++) r.push(+(arr[i]*k+r[i-1]*(1-k)).toFixed(4));
+  return r;
+}
+
+function calcMACD(closes) {
+  var e12=calcEMA(closes,12), e26=calcEMA(closes,26);
+  var dif=[], dea=[], hist=[], n=closes.length;
+  for(var i=0;i<n;i++) dif.push(+(e12[i]-e26[i]).toFixed(4));
+  for(var i=0;i<n;i++){if(i<8){dea.push(0);hist.push(0);continue}var k=2/10;if(i===8)dea.push(+(dif.slice(0,9).reduce(function(a,b){return a+b})/9).toFixed(4));else dea.push(+(dif[i]*k+dea[i-1]*(1-k)).toFixed(4));hist.push(+((dif[i]-dea[i])*2).toFixed(4));}
+  for(var i=0;i<9;i++) hist.unshift(0); dea.unshift.apply(dea,Array(9).fill(0));
+  return {dif:dif,dea:dea,hist:hist};
+}
+
+function calcBollinger(closes, period) {
+  var mid=[], up=[], low=[], n=closes.length;
+  for(var i=0;i<n;i++){if(i<period-1){mid.push(null);up.push(null);low.push(null);continue}var s=0;for(var j=0;j<period;j++)s+=closes[i-j];var m=s/period;mid.push(+m.toFixed(4));var v=0;for(var j=0;j<period;j++)v+=Math.pow(closes[i-j]-m,2);var std=Math.sqrt(v/period);up.push(+(m+2*std).toFixed(4));low.push(+(m-2*std).toFixed(4));}
+  return {mid:mid,upper:up,lower:low};
+}
+
+// ===== render =====
+function renderAll() {
+  var closes = rawData.map(function(r){return r.close});
+  var opens  = rawData.map(function(r){return r.open});
+  var highs  = rawData.map(function(r){return r.high});
+  var lows   = rawData.map(function(r){return r.low});
+  var vols   = rawData.map(function(r){return r.volume});
+  var dates  = rawData.map(function(r){return r.date});
+
+  var n = dates.length;
+  var rsi = calcRSI(closes, 14);
+  var macd = calcMACD(closes);
+  var bb = calcBollinger(closes, 20);
+
+  var RED='#e74c3c', GREEN='#27ae60';
+
+  function pad(series, front) {
+    var r = []; for(var i=0;i<front;i++)r.push(null);
+    return r.concat(series);
+  }
+  var rsiPad = pad(rsi, 15); // close.diff() costs 1, period=14 => 15
+
+  // K-line data for ECharts
+  var klineData = []; var volData = [];
+  for(var i=0;i<n;i++){
+    klineData.push([opens[i], closes[i], lows[i], highs[i]]);
+    volData.push({value: vols[i], itemStyle:{color: closes[i]>=opens[i]?RED:GREEN}});
+  }
+
+  // ===== Panel 1: K-line + BB =====
+  var kc = echarts.init(document.getElementById('chartKline'));
+  kc.setOption({
+    tooltip:{trigger:'axis',axisPointer:{type:'cross'},formatter:function(p){if(!p||!p.length)return'';var i=p[0].dataIndex,r=rawData[i],prev=i>0?rawData[i-1]:r,cg=r.close-prev.close,cgp=prev.close?cg/prev.close*100:0,cl=cg>=0?'#e74c3c':'#27ae60',sn=cg>=0?'+':'';return '<div style="font-weight:500;margin-bottom:6px">'+r.date+'</div><table style="font-size:12px;line-height:1.7"><tr><td>开盘</td><td style="padding-left:8px">'+r.open.toFixed(2)+'</td></tr><tr><td>收盘</td><td style="color:'+cl+';padding-left:8px;font-weight:500">'+r.close.toFixed(2)+'</td></tr><tr><td>最高</td><td style="padding-left:8px">'+r.high.toFixed(2)+'</td></tr><tr><td>最低</td><td style="padding-left:8px">'+r.low.toFixed(2)+'</td></tr><tr><td>涨跌</td><td style="color:'+cl+';padding-left:8px">'+sn+cg.toFixed(2)+' ('+sn+cgp.toFixed(2)+'%)</td></tr><tr><td>成交量</td><td style="padding-left:8px">'+(r.volume/10000).toFixed(2)+'万手</td></tr><tr><td>成交额</td><td style="padding-left:8px">'+(r.amount/100000000).toFixed(2)+'亿</td></tr></table>'}},
+    grid:{left:'8%',right:'8%',top:10,height:'74%'},
+    xAxis:{type:'category',data:dates,boundaryGap:true,axisLabel:{fontSize:10,formatter:function(v){return v.slice(5)}},axisLine:{onZero:false}},
+    yAxis:{type:'value',scale:true,splitArea:{show:true,areaStyle:{color:['rgba(250,250,250,.3)','rgba(248,248,248,.3)']}}},
+    dataZoom:[{type:'inside',start:50,end:100},{type:'slider',start:50,end:100,height:22,bottom:6}],
+    series:[
+      {name:'K线',type:'candlestick',data:klineData,itemStyle:{color:RED,color0:GREEN,borderColor:RED,borderColor0:GREEN}},
+      {name:'中轨',type:'line',data:bb.mid,showSymbol:false,lineStyle:{color:'#2196f3',width:1.2},smooth:true},
+      {name:'上轨',type:'line',data:bb.upper,showSymbol:false,lineStyle:{color:'#ccc',width:.8,type:'dashed'}},
+      {name:'下轨',type:'line',data:bb.lower,showSymbol:false,lineStyle:{color:'#ccc',width:.8,type:'dashed'},areaStyle:{color:'rgba(100,150,255,.03)'}}
+    ]
+  });
+
+  // ===== Panel 2: Volume =====
+  var vc = echarts.init(document.getElementById('chartVol'));
+  vc.setOption({
+    tooltip:{trigger:'axis',axisPointer:{type:'shadow'},formatter:function(p){if(!p||!p.length)return'';var i=p[0].dataIndex,r=rawData[i],cl=r.close>=r.open?'#e74c3c':'#27ae60';return '<span style="color:'+cl+'">'+r.date+'</span><br/>成交量: <b>'+(r.volume/10000).toFixed(2)+'</b> 万手<br/>成交额: <b>'+(r.amount/100000000).toFixed(2)+'</b> 亿'}},
+    grid:{left:'8%',right:'8%',top:10,height:'55%'},
+    xAxis:{type:'category',data:dates,boundaryGap:true,axisLabel:{fontSize:9,formatter:function(v){return v.slice(5)}}},
+    yAxis:{type:'value',axisLabel:{formatter:function(v){return (v/10000).toFixed(0)+'万'}}},
+    dataZoom:[{type:'inside',start:50,end:100},{type:'slider',start:50,end:100,height:18,bottom:3}],
+    series:[{name:'成交量',type:'bar',data:volData}]
+  });
+
+  // ===== Panel 3: MACD =====
+  var mc = echarts.init(document.getElementById('chartMacd'));
+  mc.setOption({
+    tooltip:{trigger:'axis'},
+    grid:{left:'8%',right:'8%',top:10,height:'55%'},
+    xAxis:{type:'category',data:dates,boundaryGap:true,axisLabel:{fontSize:9,formatter:function(v){return v.slice(5)}}},
+    yAxis:{type:'value'},
+    dataZoom:[{type:'inside',start:50,end:100},{type:'slider',start:50,end:100,height:18,bottom:3}],
+    series:[
+      {name:'DIF',type:'line',data:macd.dif,showSymbol:false,lineStyle:{color:'#1a73e8',width:1.2}},
+      {name:'DEA',type:'line',data:macd.dea,showSymbol:false,lineStyle:{color:'#e37400',width:1.2}},
+      {name:'柱',type:'bar',data:macd.hist.map(function(v){return{value:v,itemStyle:{color:v>=0?RED:GREEN}}}),barWidth:'60%'}
+    ]
+  });
+
+  // ===== Panel 4: RSI =====
+  var rc = echarts.init(document.getElementById('chartRsi'));
+  rc.setOption({
+    tooltip:{trigger:'axis'},
+    grid:{left:'8%',right:'8%',top:10,height:'65%'},
+    xAxis:{type:'category',data:dates,boundaryGap:true,axisLabel:{fontSize:10,formatter:function(v){return v.slice(5)}}},
+    yAxis:{type:'value',min:0,max:100,splitLine:{show:true,lineStyle:{color:'#f0f0f0'}}},
+    dataZoom:[{type:'inside',start:50,end:100},{type:'slider',start:50,end:100,height:18,bottom:3}],
+    series:[{
+      name:'RSI',type:'line',data:rsiPad,showSymbol:false,lineStyle:{color:'#7b1fa2',width:1.2},
+      markLine:{silent:true,data:[{yAxis:70,lineStyle:{color:RED,type:'dashed'}},{yAxis:30,lineStyle:{color:GREEN,type:'dashed'}}]}
+    }]
+  });
+
+  // Group zoom linkage
+  var g='estun_group';
+  [kc,vc,mc,rc].forEach(function(c){c.group=g});
+  echarts.connect(g);
+
+  window.addEventListener('resize',function(){kc.resize();vc.resize();mc.resize();rc.resize();});
+}
+
+// Drag and drop
+var zone = document.getElementById('uploadZone');
+zone.addEventListener('dragover',function(e){e.preventDefault();zone.classList.add('dragover')});
+zone.addEventListener('dragleave',function(){zone.classList.remove('dragover')});
+zone.addEventListener('drop',function(e){e.preventDefault();zone.classList.remove('dragover');if(e.dataTransfer.files.length){handleFile(e.dataTransfer.files[0])}});
+</script>
+</body>
+</html>
