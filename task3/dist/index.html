@@ -80,7 +80,7 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:10px}
 <div class="wrap">
 <header>
   <h1>均线交叉策略 · 交互式回测工具</h1>
-  <p>支持任意A股标的动态获取 · 可调快线/慢线天数 · 自动计算累计回报 / 夏普比率 / 最大回撤（MDD）｜ 默认数据：Tushare前复权 · 动态获取：东方财富前复权 · 涨红跌绿</p>
+  <p>支持任意A股标的动态获取 · 可调快线/慢线天数 · 自动计算累计回报 / 夏普比率 / 最大回撤（MDD）｜ 默认数据：Tushare前复权 · 动态获取：腾讯财经前复权 · 涨红跌绿</p>
 </header>
 
 <!-- 控制面板 -->
@@ -178,7 +178,7 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:10px}
   </table>
 </div>
 
-<footer>均线交叉策略回测 · 仅供教学研究，不构成投资建议 · 默认数据：Tushare · 动态获取：东方财富</footer>
+<footer>均线交叉策略回测 · 仅供教学研究，不构成投资建议 · 默认数据：Tushare · 动态获取：腾讯财经</footer>
 </div>
 
 <div class="toast-wrap" id="toastWrap"></div>
@@ -391,7 +391,7 @@ function run(){
   const r=runOne(code);
   cur=r;
   renderCards(r);renderCharts(r);renderTrades(r);renderCompare();
-  const src=EMBEDDED.has(code)?'Tushare':'东方财富';
+  const src=EMBEDDED.has(code)?'Tushare':'腾讯财经';
   let warn='';
   if(r.bt.capWarn>0&&!r.bt.trades.length){warn=` ⚠️ 资金不足！${RAW[code].name}股价约¥${r.d.close[r.d.close.length-1].toFixed(0)}，初始资金¥${fmtNum(p.cap,0)}不足以成交。已改为按股回测（非按手），请提高初始资金。`;}
   else if(r.bt.capWarn>0){warn=` ⚠️ 有${r.bt.capWarn}次信号因资金不足未能成交（按股模式，非按手）。`;}
@@ -400,25 +400,13 @@ function run(){
     +`\n注：回测按股成交(非按100股一手)，佣金万${fmtNum(p.comm*1e4,1)} + 滑点千${fmtNum(p.slip*1e3,1)}`;
 }
 
-// ============ JSONP 动态获取 ============
-let _jpCtr=0;
-function jsonp(url,cb,errCb){
-  const name='__jp_'+(++_jpCtr);
-  const s=document.createElement('script');
-  window[name]=function(data){delete window[name];s.remove();cb(data);};
-  s.src=url+'&cb='+name;
-  s.onerror=function(){delete window[name];s.remove();if(errCb)errCb('network');};
-  document.body.appendChild(s);
-  setTimeout(()=>{if(window[name]){delete window[name];s.remove();if(errCb)errCb('timeout');}},20000);
-}
-
-function detectMarket(code){
+// ============ 动态获取数据（腾讯财经，CORS 友好）============
+function marketTag(code){
   code=code.replace(/\.(SZ|SH|BJ|sz|sh|bj)$/,'');
   const c=code[0];
-  if(c==='6')return '1.'+code;      // SH
-  if(c==='0'||c==='3')return '0.'+code; // SZ
-  if(c==='8'||c==='4')return '0.'+code; // BJ
-  return '0.'+code;
+  if(c==='6')return'sh'+code;
+  if(c==='8'||c==='4')return'bj'+code;
+  return'sz'+code;
 }
 
 function fetchStock(inputCode){
@@ -437,26 +425,24 @@ function fetchStock(inputCode){
   btn.innerHTML='<span class="spinner"></span>获取中';
   btn.disabled=true;
 
-  const secid=detectMarket(code);
-  const url='https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+secid+
-    '&ut=fa5fd1943c7b386f172d6893dbbd1d0c&fields1=f1,f2,f3,f4,f5,f6'+
-    '&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=101&fqt=1&beg=20240101&end=20261231';
+  const tag=marketTag(code);
+  const url=`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tag},day,2024-01-01,,500,qfq`;
 
-  jsonp(url,function(data){
+  fetch(url).then(r=>r.json()).then(data=>{
     btn.innerHTML=orig;btn.disabled=false;
-    if(!data||!data.data||!data.data.klines||!data.data.klines.length){
+    if(!data||data.code!==0||!data.data||!data.data[tag]||!data.data[tag].qfqday){
       toast('未获取到 '+code+' 的数据，请检查代码是否正确','err');return;
     }
-    const name=data.data.name||code;
-    const klines=data.data.klines;
+    const info=data.data[tag];
+    const klines=info.qfqday;
+    const name=(info.qt&&info.qt[1])?info.qt[1]:code;
+    if(klines.length<30){toast(code+' 数据不足（仅'+klines.length+'条），无法回测','err');return;}
     const dates=[],open=[],high=[],low=[],close=[],volume=[];
     for(const kl of klines){
-      const p=kl.split(',');
-      if(p.length<6)continue;
-      dates.push(p[0]);open.push(+p[1]);close.push(+p[2]);
-      high.push(+p[3]);low.push(+p[4]);volume.push(+p[5]);
+      // Format: [date, open, close, high, low, volume]
+      dates.push(kl[0]);open.push(+kl[1]);close.push(+kl[2]);
+      high.push(+kl[3]);low.push(+kl[4]);volume.push(+kl[5]);
     }
-    if(dates.length<30){toast(code+' 数据不足（仅'+dates.length+'条），无法回测','err');return;}
     RAW[code]={name,code,dates,open,high,low,close,volume};
     const sel=document.getElementById('selStock');
     const opt=document.createElement('option');
@@ -465,9 +451,9 @@ function fetchStock(inputCode){
     document.getElementById('inpCode').value='';
     toast('已添加 '+name+'('+code+')，共 '+dates.length+' 个交易日','ok');
     updateChips();run();
-  },function(errType){
+  }).catch(err=>{
     btn.innerHTML=orig;btn.disabled=false;
-    toast('获取数据失败（'+errType+'），请检查网络后重试','err');
+    toast('获取数据失败，请检查网络后重试','err');
   });
 }
 
