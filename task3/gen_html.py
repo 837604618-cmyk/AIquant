@@ -17,9 +17,11 @@ with open(DATA_FILE, "r", encoding="utf-8") as f:
 slim = {}
 for code, info in raw.items():
     d = info["data"]
-    slim[code] = {
+    # strip .SZ/.SH suffix for uniform bare-code keys
+    base_code = code.replace(".SZ","").replace(".SH","").replace(".BJ","")
+    slim[base_code] = {
         "name": info["name"],
-        "code": code,
+        "code": base_code,
         "dates": [r["date"] for r in d],
         "open":   [round(r["open"], 2) for r in d],
         "high":   [round(r["high"], 2) for r in d],
@@ -255,13 +257,15 @@ function genSignals(maS,maL){
 function backtest(dates,open,close,pos,sig,par){
   let cash=par.cap, shares=0, hold=false;
   const eq=[], trades=[];
+  let capWarn=0;
   for(let t=0;t<dates.length;t++){
     if(t>0){
       if(sig[t-1]===1 && !hold){
         const px=open[t], rate=par.comm+par.slip, costF=1+rate;
-        const mx=Math.floor(cash/(px*costF)/100)*100;
+        const mx=Math.floor(cash/(px*costF)); // 按股成交，避免高价股无法买入
         if(mx>0){const tot=mx*px, fee=tot*rate; cash-=tot+fee; shares=mx; hold=true;
           trades.push({idx:t,date:dates[t],type:'BUY',price:px,shares:mx,amt:tot,fee,cash:cash});}
+        else{capWarn++;} // 资金不足，无法买入
       }else if(sig[t-1]===-1 && hold){
         const px=open[t], proceeds=shares*px, fee=proceeds*(par.comm+par.slip);
         cash+=proceeds-fee;
@@ -271,7 +275,7 @@ function backtest(dates,open,close,pos,sig,par){
     }
     eq.push(cash+shares*close[t]);
   }
-  return {eq,trades};
+  return {eq,trades,capWarn};
 }
 
 // ============ 指标 ============
@@ -422,8 +426,12 @@ function run(){
   cur=r;
   renderCards(r);renderCharts(r);renderTrades(r);renderCompare();
   const src=EMBEDDED.has(code)?'Tushare':'东方财富';
+  let warn='';
+  if(r.bt.capWarn>0&&!r.bt.trades.length){warn=` ⚠️ 资金不足！${RAW[code].name}股价约¥${r.d.close[r.d.close.length-1].toFixed(0)}，初始资金¥${fmtNum(p.cap,0)}不足以成交。已改为按股回测（非按手），请提高初始资金。`;}
+  else if(r.bt.capWarn>0){warn=` ⚠️ 有${r.bt.capWarn}次信号因资金不足未能成交（按股模式，非按手）。`;}
   document.getElementById('runInfo').textContent=
-    `${RAW[code].name}(${code}) · ${p.ma.toUpperCase()}(${p.fast},${p.slow}) · ${r.d.dates.length}个交易日 · ${r.d.dates[0]} ~ ${r.d.dates[r.d.dates.length-1]} · 数据:${src} · 金叉/死叉共${r.m.trades}次 · 标的池:${Object.keys(RAW).length}只`;
+    `${RAW[code].name}(${code}) · ${p.ma.toUpperCase()}(${p.fast},${p.slow}) · ${r.d.dates.length}个交易日 · ${r.d.dates[0]} ~ ${r.d.dates[r.d.dates.length-1]} · 数据:${src} · 金叉/死叉共${r.m.trades}次 · 标的池:${Object.keys(RAW).length}只${warn?'\n'+warn:''}`
+    +`\n注：回测按股成交(非按100股一手)，佣金万${fmtNum(p.comm*1e4,1)} + 滑点千${fmtNum(p.slip*1e3,1)}`;
 }
 
 // ============ JSONP 动态获取 ============
