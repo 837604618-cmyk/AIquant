@@ -337,33 +337,74 @@ function setParamsPreset(sys, btn) {
   // sys === 3: custom, don't change values
 }
 
-// ======================== DATA FETCH (NO CACHE) ========================
-async function fetchStockData(code) {
-  const tsCode = detectMarket(code) + String(code).padStart(6,'0');
-  const mkt = tsCode.slice(0,2);
-  const num = tsCode.slice(2);
-  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${mkt}${num},day,,,3200,qfq`;
+// ======================== DATA FETCH (NO CACHE, PAGINATED) ========================
+const API_BASE = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get';
+const PAGE_SIZE = 640;
+const MAX_PAGES = 5;
+const MIN_DATE = '2005-01-01';
 
+async function fetchOnePage(mkt, num, startDate, endDate) {
+  const range = startDate ? `${startDate},${endDate || ''}` : '';
+  const url = `${API_BASE}?param=${mkt}${num},day,${range},${PAGE_SIZE},qfq`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const json = await resp.json();
-  if (json.code !== 0) throw new Error('API错误: code='+json.code);
+  if (json.code !== 0) return null;
+  return json;
+}
 
+async function fetchStockData(code) {
+  const tsCode = detectMarket(code) + String(code).padStart(6,'0');
+  const mkt = tsCode.slice(0, 2);
+  const num = tsCode.slice(2);
   const key = mkt + num;
-  const stock = json.data?.[key];
-  if (!stock) throw new Error('未找到该股票');
 
-  const klines = stock.qfqday || stock.day || [];
-  if (!klines.length) throw new Error('K线数据为空');
+  // Page 1: most recent data
+  const page1 = await fetchOnePage(mkt, num, '', '');
+  if (!page1) throw new Error('API错误');
+  const stock1 = page1.data?.[key];
+  if (!stock1) throw new Error('未找到该股票（请检查代码是否正确）');
 
-  const name = stock.qt?.[key]?.[1] || '';
-  const data = klines.map(r => ({
+  const name = stock1.qt?.[key]?.[1] || '';
+  let allRows = [...(stock1.qfqday || stock1.day || [])];
+
+  if (!allRows.length) throw new Error('K线数据为空');
+
+  // Paginate backwards until we have enough history
+  let pageCount = 1;
+  while (pageCount < MAX_PAGES) {
+    const earliestDate = allRows[0][0]; // first row date
+    if (earliestDate <= MIN_DATE) break;
+
+    // Fetch page before earliest date
+    const endDate = earliestDate;
+    const pageN = await fetchOnePage(mkt, num, '2000-01-01', endDate);
+    if (!pageN) break;
+
+    const stockN = pageN.data?.[key];
+    if (!stockN) break;
+
+    const newRows = stockN.qfqday || stockN.day || [];
+    if (!newRows.length) break;
+
+    // Merge: prepend rows before earliestDate (exclude duplicate edge)
+    const filtered = newRows.filter(r => r[0] < earliestDate);
+    if (!filtered.length) break;
+
+    allRows = [...filtered, ...allRows];
+    pageCount++;
+
+    // If the first new row is already before MIN_DATE, stop
+    if (filtered[0][0] <= MIN_DATE) break;
+  }
+
+  const data = allRows.map(r => ({
     date: r[0], open: +r[1], close: +r[2], high: +r[3], low: +r[4], volume: +(r[5]||0)
   })).filter(d => d.date && d.close > 0);
 
   if (data.length < 60) throw new Error('数据不足（<60个交易日）');
 
-  return { data, name, count: data.length, lastDate: data[data.length-1].date };
+  return { data, name, count: data.length, lastDate: data[data.length-1].date, pages: pageCount };
 }
 
 // ======================== INDICATORS ========================
