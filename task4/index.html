@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>海龟战法回测系统 | Turtle Trading System</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+:root {
+  --bg: #f5f6fa;
+  --card: #ffffff;
+  --text: #2c3e50;
+  --sub: #7f8c8d;
+  --border: #e1e5eb;
+  --accent: #e74c3c;
+  --green: #27ae60;
+  --blue: #3498db;
+  --orange: #f39c12;
+  --radius: 10px;
+  --shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* Header */
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #fff; padding: 16px 28px; display:flex; align-items:center; justify-content:space-between; }
+.header h1 { font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+.header .subtitle { font-size: 12px; opacity: .7; margin-top:2px; }
+.badge { display:inline-block; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; margin-left:8px; }
+.badge-live { background: #27ae60; }
+
+/* Layout */
+.layout { display:grid; grid-template-columns: 280px 1fr 300px; gap:16px; padding:16px; max-width:1440px; margin:0 auto; min-height: calc(100vh - 82px); }
+
+/* Cards */
+.card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding:18px; }
+.card-title { font-size: 15px; font-weight: 700; margin-bottom:14px; padding-bottom:10px; border-bottom: 2px solid var(--border); display:flex; align-items:center; gap:8px; }
+.card-title .icon { font-size:18px; }
+
+/* Left Panel */
+.param-group { margin-bottom:16px; }
+.param-group label { display:block; font-size:12px; color: var(--sub); margin-bottom:5px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+.param-group input, .param-group select { width:100%; padding:9px 12px; border:1.5px solid var(--border); border-radius:7px; font-size:14px; outline:none; transition:border .2s; background:#fafbfc; }
+.param-group input:focus, .param-group select:focus { border-color: var(--blue); background:#fff; }
+.stock-search { position:relative; }
+.stock-search .suggestions { position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid var(--border); border-radius:0 0 8px 8px; max-height:200px; overflow-y:auto; z-index:100; display:none; box-shadow:0 4px 12px rgba(0,0,0,.1); }
+.stock-search .suggestions .item { padding:10px 14px; cursor:pointer; font-size:13px; border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between; }
+.stock-search .suggestions .item:hover { background:#eef5ff; }
+.stock-search .suggestions .item .code { color:var(--sub); font-size:12px; }
+.preset-stocks { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.preset-stocks button { padding:5px 10px; border:1px solid var(--border); border-radius:5px; background:#fff; font-size:12px; cursor:pointer; white-space:nowrap; transition:all .15s; }
+.preset-stocks button:hover { border-color: var(--blue); color: var(--blue); background: #eef5ff; }
+.data-status { display:flex; align-items:center; gap:6px; font-size:11px; margin-top:6px; }
+.data-status .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.dot-fresh { background: #27ae60; }
+.dot-stale { background: #f39c12; }
+.dot-none { background: #bdc3c7; }
+
+.row-2 { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+.btn { width:100%; padding:11px; border:none; border-radius:7px; font-size:14px; font-weight:700; cursor:pointer; transition:all .2s; letter-spacing:.5px; }
+.btn-primary { background: linear-gradient(135deg, #e74c3c, #c0392b); color:#fff; margin-bottom:8px; }
+.btn-primary:hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(231,76,60,.3); }
+.btn-primary:disabled { opacity:.6; cursor:not-allowed; transform:none; }
+.btn-secondary { background: #fff; color: var(--text); border:1.5px solid var(--border); }
+.btn-secondary:hover { border-color: var(--blue); color: var(--blue); }
+
+/* Center */
+.chart-area { display:flex; flex-direction:column; gap:14px; }
+.chart-box { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding:14px; }
+.chart-box .title { font-size:14px; font-weight:700; margin-bottom:8px; }
+.chart-container { width:100%; height:320px; }
+.chart-container-sm { width:100%; height:240px; }
+
+.loading-overlay { display:none; position:absolute; inset:0; background:rgba(255,255,255,.85); z-index:10; justify-content:center; align-items:center; flex-direction:column; border-radius:var(--radius); }
+.loading-overlay.active { display:flex; }
+.spinner { width:40px; height:40px; border:3px solid var(--border); border-top-color: var(--blue); border-radius:50%; animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.loading-text { margin-top:10px; font-size:13px; color: var(--sub); }
+
+/* Right Panel */
+.metric-grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+.metric-item { text-align:center; padding:10px 6px; background:#f8f9fc; border-radius:8px; }
+.metric-item .val { font-size:20px; font-weight:800; }
+.metric-item .lbl { font-size:10px; color: var(--sub); margin-top:2px; }
+.val-up { color: #e74c3c; }
+.val-down { color: #27ae60; }
+
+.trade-table { width:100%; font-size:11px; border-collapse:collapse; margin-top:8px; }
+.trade-table th { background:#f8f9fc; padding:7px 6px; text-align:left; font-weight:600; font-size:10px; color:var(--sub); border-bottom:2px solid var(--border); }
+.trade-table td { padding:6px 6px; border-bottom:1px solid #f0f0f0; }
+.trade-table .win { color: #e74c3c; }
+.trade-table .loss { color: #27ae60; }
+.trade-table tbody { display:block; max-height:300px; overflow-y:auto; }
+.trade-table thead, .trade-table tbody tr { display:table; width:100%; table-layout:fixed; }
+
+/* Empty state */
+.empty-state { text-align:center; padding:60px 20px; color: var(--sub); }
+.empty-state .big-icon { font-size:64px; margin-bottom:16px; opacity:.5; }
+.empty-state p { font-size:14px; line-height:1.8; }
+
+/* Toast */
+.toast { position:fixed; top:20px; right:20px; padding:12px 20px; border-radius:8px; color:#fff; font-size:13px; z-index:9999; opacity:0; transform:translateX(100%); transition:all .3s; max-width:360px; }
+.toast.show { opacity:1; transform:translateX(0); }
+.toast-success { background:#27ae60; }
+.toast-error { background:#e74c3c; }
+.toast-info { background:#3498db; }
+
+/* Responsive */
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: 1fr; }
+  .right-panel { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>🐢 海龟战法回测系统 <span class="badge badge-live">A股·仅做多</span></h1>
+    <div class="subtitle">Turtle Trading System — 腾讯财经数据源 · 实时回测</div>
+  </div>
+</div>
+
+<div class="layout">
+  <!-- LEFT: Parameters -->
+  <div class="card" style="position:relative;">
+    <div class="card-title"><span class="icon">⚙️</span> 策略参数</div>
+
+    <div class="param-group">
+      <label>股票代码</label>
+      <div class="stock-search">
+        <input type="text" id="stockCode" placeholder="输入代码搜索，如 000001" autocomplete="off">
+        <div class="suggestions" id="suggestions"></div>
+      </div>
+      <div class="preset-stocks">
+        <button onclick="selectStock('000001','平安银行')">000001 平安银行</button>
+        <button onclick="selectStock('600519','贵州茅台')">600519 贵州茅台</button>
+        <button onclick="selectStock('000858','五粮液')">000858 五粮液</button>
+        <button onclick="selectStock('300750','宁德时代')">300750 宁德时代</button>
+        <button onclick="selectStock('601318','中国平安')">601318 中国平安</button>
+        <button onclick="selectStock('600036','招商银行')">600036 招商银行</button>
+      </div>
+      <div class="data-status" id="dataStatus">
+        <span class="dot dot-none"></span>
+        <span id="dataStatusText">等待加载数据</span>
+      </div>
+    </div>
+
+    <div class="param-group">
+      <label>交易系统</label>
+      <select id="systemSelect">
+        <option value="1">系统1 — 短线 (20日突破/10日退出)</option>
+        <option value="2">系统2 — 长线 (55日突破/20日退出)</option>
+      </select>
+    </div>
+
+    <div class="row-2">
+      <div class="param-group">
+        <label>起始日期</label>
+        <input type="date" id="startDate" value="2019-01-01">
+      </div>
+      <div class="param-group">
+        <label>结束日期</label>
+        <input type="date" id="endDate" value="2026-07-09">
+      </div>
+    </div>
+
+    <div class="row-2">
+      <div class="param-group">
+        <label>初始资金 (万)</label>
+        <input type="number" id="initialCapital" value="100" step="1" min="1">
+      </div>
+      <div class="param-group">
+        <label>ATR 周期</label>
+        <input type="number" id="atrPeriod" value="20" min="5" max="60">
+      </div>
+    </div>
+
+    <div class="row-2">
+      <div class="param-group">
+        <label>风险比例/单位</label>
+        <input type="number" id="riskPercent" value="1" min="0.1" max="5" step="0.1">
+      </div>
+      <div class="param-group">
+        <label>最大加仓单位</label>
+        <input type="number" id="maxUnits" value="4" min="1" max="8">
+      </div>
+    </div>
+
+    <div class="row-2">
+      <div class="param-group">
+        <label>手续费 (%)</label>
+        <input type="number" id="commission" value="0.03" min="0" max="1" step="0.01">
+      </div>
+      <div class="param-group">
+        <label>滑点 (%)</label>
+        <input type="number" id="slippage" value="0.01" min="0" max="1" step="0.01">
+      </div>
+    </div>
+
+    <button class="btn btn-secondary" onclick="refreshData()" id="btnRefresh">🔄 更新数据</button>
+    <button class="btn btn-primary" onclick="runBacktest()" id="btnRun">▶ 开始回测</button>
+
+    <div class="loading-overlay" id="loadingOverlay">
+      <div class="spinner"></div>
+      <div class="loading-text" id="loadingText">正在加载数据...</div>
+    </div>
+  </div>
+
+  <!-- CENTER: Charts -->
+  <div class="chart-area" id="chartArea">
+    <div class="chart-box">
+      <div class="title">📈 权益曲线 — 策略 vs 买入持有</div>
+      <div class="chart-container" id="chartEquity"></div>
+    </div>
+    <div class="chart-box">
+      <div class="title">📉 回撤曲线</div>
+      <div class="chart-container-sm" id="chartDrawdown"></div>
+    </div>
+    <div class="chart-box">
+      <div class="title">📊 年度收益对比</div>
+      <div class="chart-container-sm" id="chartAnnual"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Metrics & Trades -->
+  <div class="right-panel" style="display:flex;flex-direction:column;gap:14px;">
+    <div class="card">
+      <div class="card-title"><span class="icon">📋</span> 绩效指标</div>
+      <div class="metric-grid" id="metricsGrid">
+        <div class="empty-state" style="grid-column:1/-1; padding:40px;">
+          <p style="font-size:13px;">输入股票代码<br>点击「开始回测」查看结果</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
+      <div class="card-title"><span class="icon">📝</span> 交易记录</div>
+      <div style="overflow-y:auto;flex:1;">
+        <table class="trade-table" id="tradeTable">
+          <thead><tr>
+            <th style="width:18%">日期</th><th style="width:18%">类型</th>
+            <th style="width:22%">价格</th><th style="width:20%">数量</th>
+            <th style="width:22%">盈亏</th>
+          </tr></thead>
+          <tbody><tr><td colspan="5" style="text-align:center;color:var(--sub);padding:40px;">暂无交易记录</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ======================== CONSTANTS ========================
+const STOCK_LIST = [
+  {code:'000001',name:'平安银行',market:'sz'},{code:'000002',name:'万科A',market:'sz'},
+  {code:'000333',name:'美的集团',market:'sz'},{code:'000651',name:'格力电器',market:'sz'},
+  {code:'000725',name:'京东方A',market:'sz'},{code:'000858',name:'五粮液',market:'sz'},
+  {code:'002230',name:'科大讯飞',market:'sz'},{code:'002415',name:'海康威视',market:'sz'},
+  {code:'002475',name:'立讯精密',market:'sz'},{code:'002594',name:'比亚迪',market:'sz'},
+  {code:'002714',name:'牧原股份',market:'sz'},{code:'300059',name:'东方财富',market:'sz'},
+  {code:'300124',name:'汇川技术',market:'sz'},{code:'300274',name:'阳光电源',market:'sz'},
+  {code:'300750',name:'宁德时代',market:'sz'},{code:'600000',name:'浦发银行',market:'sh'},
+  {code:'600009',name:'上海机场',market:'sh'},{code:'600028',name:'中国石化',market:'sh'},
+  {code:'600030',name:'中信证券',market:'sh'},{code:'600031',name:'三一重工',market:'sh'},
+  {code:'600036',name:'招商银行',market:'sh'},{code:'600048',name:'保利发展',market:'sh'},
+  {code:'600050',name:'中国联通',market:'sh'},{code:'600104',name:'上汽集团',market:'sh'},
+  {code:'600276',name:'恒瑞医药',market:'sh'},{code:'600309',name:'万华化学',market:'sh'},
+  {code:'600406',name:'国电南瑞',market:'sh'},{code:'600436',name:'片仔癀',market:'sh'},
+  {code:'600519',name:'贵州茅台',market:'sh'},{code:'600585',name:'海螺水泥',market:'sh'},
+  {code:'600809',name:'山西汾酒',market:'sh'},{code:'600887',name:'伊利股份',market:'sh'},
+  {code:'600900',name:'长江电力',market:'sh'},{code:'601012',name:'隆基绿能',market:'sh'},
+  {code:'601088',name:'中国神华',market:'sh'},{code:'601166',name:'兴业银行',market:'sh'},
+  {code:'601318',name:'中国平安',market:'sh'},{code:'601398',name:'工商银行',market:'sh'},
+  {code:'601668',name:'中国建筑',market:'sh'},{code:'601857',name:'中国石油',market:'sh'},
+  {code:'601888',name:'中国中免',market:'sh'},{code:'601899',name:'紫金矿业',market:'sh'},
+  {code:'603259',name:'药明康德',market:'sh'},{code:'603288',name:'海天味业',market:'sh'},
+  {code:'688981',name:'中芯国际',market:'sh'},
+];
+
+// ======================== UTILS ========================
+function detectMarket(code) {
+  code = String(code).padStart(6, '0');
+  const first = code[0];
+  if (['0','3'].includes(first)) return 'sz';
+  if (['6'].includes(first)) return 'sh';
+  return 'sz';
+}
+
+function getTsCode(code) {
+  code = String(code).padStart(6,'0');
+  return detectMarket(code) + code;
+}
+
+function formatMoney(n) {
+  if (Math.abs(n) >= 1e8) return (n/1e8).toFixed(2)+'亿';
+  if (Math.abs(n) >= 1e4) return (n/1e4).toFixed(2)+'万';
+  return n.toFixed(2);
+}
+
+function formatPct(n) { return (n>=0?'+':'')+n.toFixed(2)+'%'; }
+function pctColor(n) { return n>=0?'val-up':'val-down'; }
+
+function showToast(msg, type='info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast toast-'+type+' show';
+  clearTimeout(t._tid);
+  t._tid = setTimeout(()=>t.classList.remove('show'), 3000);
+}
+
+function showLoading(text) {
+  document.getElementById('loadingText').textContent = text;
+  document.getElementById('loadingOverlay').classList.add('active');
+  document.getElementById('btnRun').disabled = true;
+}
+
+function hideLoading() {
+  document.getElementById('loadingOverlay').classList.remove('active');
+  document.getElementById('btnRun').disabled = false;
+}
+
+// ======================== DATA MANAGER ========================
+const DataManager = {
+  CACHE_PREFIX: 'turtle_data_',
+
+  getCacheKey(tsCode) {
+    return this.CACHE_PREFIX + tsCode;
+  },
+
+  getFromCache(tsCode) {
+    try {
+      const raw = localStorage.getItem(this.getCacheKey(tsCode));
+      if (!raw) return null;
+      const cache = JSON.parse(raw);
+      return cache;
+    } catch(e) { return null; }
+  },
+
+  saveToCache(tsCode, data) {
+    try {
+      const cache = { data, lastFetch: Date.now(), lastDate: data[data.length-1]?.[0] || '' };
+      localStorage.setItem(this.getCacheKey(tsCode), JSON.stringify(cache));
+      // Also save versioned copy for clean stale detection
+      localStorage.setItem(this.getCacheKey(tsCode) + '_v', JSON.stringify({v:1,lastDate: cache.lastDate}));
+    } catch(e) { /* quota exceeded - clear old */ }
+  },
+
+  async fetchFromTencent(tsCode, count = 3000) {
+    const market = tsCode.slice(0,2);
+    const code = tsCode.slice(2);
+    const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${market}${code},day,,,${count},qfq`;
+    
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json();
+    if (json.code !== 0) throw new Error('API返回错误: code='+json.code);
+
+    const key = market + code;
+    const stockData = json.data?.[key];
+    if (!stockData) throw new Error('未找到股票数据');
+    
+    const klines = stockData.qfqday || stockData.day || [];
+    if (!klines.length) throw new Error('K线数据为空');
+
+    const name = stockData.qt?.[key]?.[1] || '';
+
+    // Parse: [date, open, close, high, low, volume]
+    const data = klines.map(row => ({
+      date: row[0],
+      open: parseFloat(row[1]),
+      close: parseFloat(row[2]),
+      high: parseFloat(row[3]),
+      low: parseFloat(row[4]),
+      volume: parseFloat(row[5]) || 0
+    })).filter(d => d.date && !isNaN(d.close) && d.close > 0);
+
+    return { data, name };
+  },
+
+  async loadData(code, forceRefresh = false) {
+    let tsCode = code.includes('.') ? code : getTsCode(code);
+    const cleanCode = tsCode.split('.')[0].slice(2) || code.padStart(6,'0');
+
+    if (!forceRefresh) {
+      const cached = this.getFromCache(tsCode);
+      if (cached && cached.data && cached.data.length > 50) {
+        return { data: cached.data, name: '', cached: true, lastDate: cached.lastDate };
+      }
+    }
+
+    const result = await this.fetchFromTencent(tsCode, 3000);
+    this.saveToCache(tsCode, result.data);
+    return { ...result, cached: false, lastDate: result.data[result.data.length-1]?.date || '' };
+  }
+};
+
+// ======================== INDICATORS ========================
+const Indicators = {
+  TR(data) {
+    const tr = new Array(data.length).fill(0);
+    for (let i = 1; i < data.length; i++) {
+      const h = data[i].high, l = data[i].low, pc = data[i-1].close;
+      tr[i] = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+    }
+    tr[0] = tr[1] || 0;
+    return tr;
+  },
+
+  SMA(arr, period) {
+    const result = new Array(arr.length).fill(0);
+    let sum = 0;
+    for (let i = 0; i < arr.length; i++) {
+      sum += arr[i];
+      if (i >= period) sum -= arr[i - period];
+      if (i >= period - 1) result[i] = sum / period;
+      else result[i] = sum / (i + 1);
+    }
+    return result;
+  },
+
+  ATR(data, period) {
+    const tr = this.TR(data);
+    return this.SMA(tr, period);
+  },
+
+  rollingMax(arr, period) {
+    const result = new Array(arr.length).fill(0);
+    for (let i = 0; i < arr.length; i++) {
+      let mx = arr[i];
+      for (let j = Math.max(0, i - period + 1); j <= i; j++) {
+        if (arr[j] > mx) mx = arr[j];
+      }
+      result[i] = mx;
+    }
+    return result;
+  },
+
+  rollingMin(arr, period) {
+    const result = new Array(arr.length).fill(0);
+    for (let i = 0; i < arr.length; i++) {
+      let mn = arr[i];
+      for (let j = Math.max(0, i - period + 1); j <= i; j++) {
+        if (arr[j] < mn) mn = arr[j];
+      }
+      result[i] = mn;
+    }
+    return result;
+  }
+};
+
+// ======================== TURTLE STRATEGY ========================
+function runTurtleBacktest(data, params) {
+  const {
+    system, entryPeriod, exitPeriod, atrPeriod,
+    riskPercent, maxUnits, addGapATR, stopLossATR,
+    initialCapital, commission, slippage
+  } = params;
+
+  const n = data.length;
+  const atr = Indicators.ATR(data, atrPeriod);
+  const highs = data.map(d => d.high);
+  const lows = data.map(d => d.low);
+  const closes = data.map(d => d.close);
+
+  // Start from max lookback
+  const maxLookback = Math.max(entryPeriod, exitPeriod, atrPeriod) + 5;
+  const startIdx = Math.max(maxLookback, 0);
+
+  // State
+  let cash = initialCapital;
+  let lots = []; // [{shares, entryPrice, entryDate, stopPrice}]
+  let equity = [];
+  let trades = [];
+  let lastBreakoutPnl = null; // For System 1 filter
+  let breakoutUnits = null;   // Track current breakout group
+
+  // Buy & hold benchmark
+  const bhShares = Math.floor(initialCapital / data[startIdx].close);
+  const bhCost = bhShares * data[startIdx].close * (1 + commission);
+  const bhCash = initialCapital - bhCost;
+  const benchmark = [];
+
+  for (let i = 0; i <= startIdx; i++) {
+    equity.push(initialCapital);
+    benchmark.push(initialCapital);
+  }
+
+  for (let i = startIdx + 1; i < n; i++) {
+    const today = data[i];
+    const prevDay = data[i-1];
+    const todayClose = today.close;
+    const todayHigh = today.high;
+    const todayLow = today.low;
+    const todayOpen = today.open;
+
+    // Update market value
+    let positionValue = 0;
+    for (const lot of lots) positionValue += lot.shares * todayClose;
+    const totalEquity = cash + positionValue;
+    equity.push(totalEquity);
+
+    // Benchmark
+    benchmark.push(bhCash + bhShares * todayClose);
+
+    // ---- 1. Check Stop Loss (use today's low) ----
+    const survivingLots = [];
+    for (const lot of lots) {
+      // If today's low hits stop, exit at stop price (or open if gapped)
+      if (todayLow <= lot.stopPrice) {
+        let exitPrice = lot.stopPrice;
+        // If gapped below stop, exit at open
+        if (todayOpen < lot.stopPrice) exitPrice = todayOpen;
+        exitPrice = exitPrice * (1 - slippage);
+
+        // A-share price limit check
+        const limitDown = prevDay.close * 0.9;
+        if (exitPrice < limitDown) exitPrice = limitDown;
+
+        const proceeds = lot.shares * exitPrice * (1 - commission);
+        const pnl = proceeds - lot.shares * lot.entryPrice * (1 + commission);
+        cash += proceeds;
+
+        trades.push({
+          date: today.date, type: '止损平仓', price: exitPrice,
+          shares: lot.shares, pnl, pnlPct: (pnl / (lot.shares * lot.entryPrice * (1+commission))) * 100
+        });
+      } else {
+        survivingLots.push(lot);
+      }
+    }
+    lots = survivingLots;
+
+    // Update stop prices for surviving lots (no trailing in original)
+    // (stop remains at entry - 2*ATR, already set)
+
+    // ---- 2. Check Exit Breakout ----
+    if (lots.length > 0) {
+      const exitLow = Indicators.rollingMin(lows, exitPeriod)[i - 1]; // use i-1 to avoid lookahead
+      if (todayClose < exitLow) {
+        let totalPnl = 0;
+        for (const lot of lots) {
+          let exitPrice = todayClose * (1 - slippage);
+          const limitDown = prevDay.close * 0.9;
+          if (exitPrice < limitDown) exitPrice = limitDown;
+
+          const proceeds = lot.shares * exitPrice * (1 - commission);
+          const pnl = proceeds - lot.shares * lot.entryPrice * (1 + commission);
+          totalPnl += pnl;
+          cash += proceeds;
+
+          trades.push({
+            date: today.date, type: '突破退出', price: exitPrice,
+            shares: lot.shares, pnl, pnlPct: (pnl / (lot.shares * lot.entryPrice * (1+commission))) * 100
+          });
+        }
+        // Track breakout PnL for System 1 filter
+        if (breakoutUnits !== null) {
+          lastBreakoutPnl = totalPnl;
+          breakoutUnits = null;
+        }
+        lots = [];
+      }
+    }
+
+    // ---- 3. Recalculate unit size ----
+    const currentATR = atr[i - 1] || atr[Math.max(0, i-2)] || 0.01;
+    const riskAmount = (cash + positionValue) * (riskPercent / 100);
+    const unitSize = Math.max(100, Math.floor(riskAmount / currentATR / 100) * 100); // Round to 100 shares
+
+    // ---- 4. Check Entry Breakout ----
+    const entryHigh = Indicators.rollingMax(highs, entryPeriod)[i - 1];
+    const totalUnits = lots.length;
+
+    if (lots.length === 0) {
+      // No position - check for new entry
+      if (todayClose > entryHigh) {
+        // System 1 filter
+        if (system === 1 && lastBreakoutPnl !== null && lastBreakoutPnl > 0) {
+          // Skip - last breakout was profitable
+        } else {
+          // Enter!
+          const entryPrice = todayClose * (1 + slippage);
+          const limitUp = prevDay.close * 1.1;
+          const actualEntry = Math.min(entryPrice, limitUp);
+
+          const cost = unitSize * actualEntry * (1 + commission);
+          if (cost <= cash && unitSize > 0) {
+            const stopPrice = actualEntry * (1 - stopLossATR * currentATR / actualEntry);
+            // stopPrice = actualEntry - stopLossATR * currentATR
+            const sp = actualEntry - stopLossATR * currentATR;
+            lots.push({ shares: unitSize, entryPrice: actualEntry, entryDate: today.date, stopPrice: sp });
+            cash -= cost;
+            breakoutUnits = lots; // Track for System 1 filter
+            lastBreakoutPnl = null; // Reset filter for next signal
+
+            trades.push({
+              date: today.date, type: '突破买入', price: actualEntry,
+              shares: unitSize, pnl: 0, pnlPct: 0
+            });
+          }
+        }
+      }
+    } else {
+      // Have position - check pyramiding
+      if (lots.length < maxUnits) {
+        const lastEntry = lots[lots.length - 1].entryPrice;
+        if (todayClose >= lastEntry + addGapATR * currentATR) {
+          const entryPrice = todayClose * (1 + slippage);
+          const limitUp = prevDay.close * 1.1;
+          const actualEntry = Math.min(entryPrice, limitUp);
+
+          const cost = unitSize * actualEntry * (1 + commission);
+          if (cost <= cash && unitSize > 0) {
+            const sp = actualEntry - stopLossATR * currentATR;
+            lots.push({ shares: unitSize, entryPrice: actualEntry, entryDate: today.date, stopPrice: sp });
+            cash -= cost;
+
+            trades.push({
+              date: today.date, type: '金字塔加仓', price: actualEntry,
+              shares: unitSize, pnl: 0, pnlPct: 0
+            });
+          }
+        }
+      }
+
+      // Also check if price broke out again (new entry signal while already in position)
+      // Original Turtle: you can re-enter at breakout even while in position (reset unit count)
+      if (todayClose > entryHigh && lots.length >= maxUnits) {
+        // Already at max - could reset but let's skip for simplicity
+      }
+    }
+  }
+
+  return { equity, benchmark, trades, data, params, startIdx };
+}
+
+// ======================== METRICS CALCULATION ========================
+function calculateMetrics(equity, benchmark, trades, data, params) {
+  const n = equity.length;
+  
+  // Returns
+  const totalReturn = (equity[n-1] - equity[0]) / equity[0] * 100;
+  const bhReturn = (benchmark[n-1] - benchmark[0]) / benchmark[0] * 100;
+
+  // Trading days
+  const tradingDays = data.length - params.startIdx;
+  const years = tradingDays / 252;
+  const annualReturn = (Math.pow(1 + totalReturn/100, 1/years) - 1) * 100;
+  const bhAnnualReturn = (Math.pow(1 + bhReturn/100, 1/years) - 1) * 100;
+
+  // Drawdown
+  let peak = equity[0], maxDD = 0, ddStart = 0, ddEnd = 0;
+  let peakIdx = 0;
+  const drawdowns = [];
+  for (let i = 0; i < n; i++) {
+    if (equity[i] > peak) { peak = equity[i]; peakIdx = i; }
+    const dd = (peak - equity[i]) / peak * 100;
+    drawdowns.push(-dd);
+    if (dd > maxDD) { maxDD = dd; ddStart = peakIdx; ddEnd = i; }
+  }
+
+  // Volatility (daily returns)
+  const dailyReturns = [];
+  for (let i = 1; i < n; i++) {
+    if (equity[i-1] > 0) dailyReturns.push((equity[i] - equity[i-1]) / equity[i-1]);
+  }
+  const meanRet = dailyReturns.reduce((a,b)=>a+b,0) / dailyReturns.length;
+  const variance = dailyReturns.reduce((a,b)=>a+(b-meanRet)**2, 0) / dailyReturns.length;
+  const dailyVol = Math.sqrt(variance);
+  const annualVol = dailyVol * Math.sqrt(252) * 100;
+
+  // Sharpe ratio (assuming risk-free = 2%)
+  const rf = 0.02;
+  const sharpe = annualVol > 0 ? (annualReturn/100 - rf) / (annualVol/100) : 0;
+
+  // Calmar ratio
+  const calmar = maxDD > 0 ? (annualReturn/100) / (maxDD/100) : 0;
+
+  // Trade statistics
+  const closedTrades = trades.filter(t => t.type !== '突破买入' && t.type !== '金字塔加仓');
+  const allTrades = trades.filter(t => t.type === '突破买入' || t.type === '金字塔加仓');
+  const winTrades = closedTrades.filter(t => t.pnl > 0);
+  const lossTrades = closedTrades.filter(t => t.pnl < 0);
+  const winRate = closedTrades.length > 0 ? winTrades.length / closedTrades.length * 100 : 0;
+  
+  let totalWin = winTrades.reduce((a,t)=>a+t.pnl, 0);
+  let totalLoss = Math.abs(lossTrades.reduce((a,t)=>a+t.pnl, 0));
+  const avgWin = winTrades.length > 0 ? totalWin / winTrades.length : 0;
+  const avgLoss = lossTrades.length > 0 ? totalLoss / lossTrades.length : 0;
+  const profitFactor = totalLoss > 0 ? totalWin / totalLoss : (totalWin > 0 ? Infinity : 0);
+
+  // Consecutive wins/losses
+  let maxConsecWins = 0, maxConsecLosses = 0, curWins = 0, curLosses = 0;
+  for (const t of closedTrades) {
+    if (t.pnl > 0) { curWins++; curLosses = 0; if (curWins > maxConsecWins) maxConsecWins = curWins; }
+    else if (t.pnl < 0) { curLosses++; curWins = 0; if (curLosses > maxConsecLosses) maxConsecLosses = curLosses; }
+  }
+
+  // Avg hold days
+  let totalHoldDays = 0, holdCount = 0;
+  const buyDates = {};
+  for (const t of trades) {
+    if (t.type === '突破买入' || t.type === '金字塔加仓') {
+      buyDates[t.date] = (buyDates[t.date] || 0) + t.shares;
+    } else {
+      // Find matching buy date (simplified: just count from first buy)
+      holdCount++;
+    }
+  }
+
+  return {
+    totalReturn, bhReturn, excessReturn: totalReturn - bhReturn,
+    annualReturn, bhAnnualReturn,
+    maxDD, ddStart, ddEnd,
+    annualVol, sharpe, calmar,
+    totalTrades: allTrades.length, closedTrades: closedTrades.length,
+    winRate, avgWin, avgLoss, profitFactor,
+    maxConsecWins, maxConsecLosses,
+    years, tradingDays,
+    drawdowns
+  };
+}
+
+// ======================== CHART RENDERING ========================
+let equityChart, ddChart, annualChart;
+
+function initCharts() {
+  equityChart = echarts.init(document.getElementById('chartEquity'));
+  ddChart = echarts.init(document.getElementById('chartDrawdown'));
+  annualChart = echarts.init(document.getElementById('chartAnnual'));
+
+  window.addEventListener('resize', () => {
+    equityChart?.resize();
+    ddChart?.resize();
+    annualChart?.resize();
+  });
+}
+
+function renderEquityChart(result) {
+  const { equity, benchmark, data, metrics, params } = result;
+  const dates = data.slice(params.startIdx).map(d => d.date);
+  const eq = equity.slice(1); // skip first initial value
+  const bm = benchmark.slice(1);
+
+  const option = {
+    tooltip: {
+      trigger: 'axis',
+      formatter: p => {
+        let s = p[0].axisValue + '<br/>';
+        p.forEach(px => {
+          const v = px.value;
+          const initEq = equity[0];
+          const ret = ((v - initEq) / initEq * 100).toFixed(2);
+          s += `${px.marker} ${px.seriesName}: ¥${v.toFixed(0)} (${ret}%)<br/>`;
+        });
+        return s;
+      }
+    },
+    legend: { data: ['策略权益', '买入持有'], top: 5, textStyle: {fontSize:12} },
+    grid: { left: 65, right: 40, top: 40, bottom: 30 },
+    xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10, rotate: 30, formatter: v => v.slice(0,7) } },
+    yAxis: { type: 'value', axisLabel: { fontSize: 10, formatter: v => (v/10000).toFixed(0)+'万' } },
+    series: [
+      {
+        name: '策略权益', type: 'line', data: eq, smooth: true,
+        lineStyle: { color: '#e74c3c', width: 2 },
+        itemStyle: { color: '#e74c3c' },
+        symbol: 'none'
+      },
+      {
+        name: '买入持有', type: 'line', data: bm, smooth: true,
+        lineStyle: { color: '#95a5a6', width: 1.5, type: 'dashed' },
+        symbol: 'none'
+      }
+    ]
+  };
+  equityChart.setOption(option, true);
+}
+
+function renderDrawdownChart(result) {
+  const { data, metrics, params } = result;
+  const dates = data.slice(params.startIdx).map(d => d.date);
+
+  const option = {
+    tooltip: { trigger: 'axis', formatter: p => `${p[0].axisValue}<br/>回撤: ${p[0].value.toFixed(2)}%` },
+    grid: { left: 55, right: 20, top: 15, bottom: 30 },
+    xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10, rotate: 30, formatter: v => v.slice(0,7) } },
+    yAxis: { type: 'value', axisLabel: { fontSize: 10, formatter: v => v+'%' }, max: 0 },
+    series: [{
+      name: '回撤', type: 'line', data: metrics.drawdowns, smooth: true,
+      lineStyle: { color: '#27ae60', width: 0 },
+      areaStyle: { color: new echarts.graphic.LinearGradient(0,0,0,1,[
+        {offset:0, color:'rgba(39,174,96,0.4)'}, {offset:1, color:'rgba(39,174,96,0.02)'}
+      ])},
+      markLine: {
+        silent: true,
+        data: [{ yAxis: -metrics.maxDD, label: { formatter: `最大回撤 ${metrics.maxDD.toFixed(2)}%`, fontSize: 10 } }],
+        lineStyle: { color: '#e74c3c', type: 'dashed' }
+      },
+      symbol: 'none'
+    }]
+  };
+  ddChart.setOption(option, true);
+}
+
+function renderAnnualChart(result) {
+  const { equity, benchmark, data, params } = result;
+  const dates = data.slice(params.startIdx).map(d => d.date);
+
+  // Group by year
+  const annual = {};
+  for (let i = 0; i < dates.length; i++) {
+    const year = dates[i].slice(0, 4);
+    if (!annual[year]) annual[year] = { stratStart: 0, stratEnd: 0, bhStart: 0, bhEnd: 0, count: 0 };
+    if (annual[year].count === 0) {
+      annual[year].stratStart = i > 0 ? equity[i] : equity[0];
+      annual[year].bhStart = i > 0 ? benchmark[i] : benchmark[0];
+    }
+    annual[year].stratEnd = equity[i+1] || equity[i];
+    annual[year].bhEnd = benchmark[i+1] || benchmark[i];
+    annual[year].count++;
+  }
+
+  const years = Object.keys(annual).sort();
+  const stratReturns = years.map(y => {
+    const a = annual[y];
+    return a.stratStart > 0 ? ((a.stratEnd - a.stratStart) / a.stratStart * 100) : 0;
+  });
+  const bhReturns = years.map(y => {
+    const a = annual[y];
+    return a.bhStart > 0 ? ((a.bhEnd - a.bhStart) / a.bhStart * 100) : 0;
+  });
+
+  const option = {
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['策略', '买入持有'], top: 5, textStyle: {fontSize:12} },
+    grid: { left: 50, right: 20, top: 40, bottom: 30 },
+    xAxis: { type: 'category', data: years, axisLabel: {fontSize:11} },
+    yAxis: { type: 'value', axisLabel: { fontSize: 10, formatter: v=>v+'%' } },
+    series: [
+      { name: '策略', type: 'bar', data: stratReturns, itemStyle: { color: p => p.value >= 0 ? '#e74c3c' : '#27ae60' }, barMaxWidth: 20 },
+      { name: '买入持有', type: 'bar', data: bhReturns, itemStyle: { color: p => p.value >= 0 ? '#fab1a0' : '#55efc4' }, barMaxWidth: 20 }
+    ]
+  };
+  annualChart.setOption(option, true);
+}
+
+// ======================== UI RENDERING ========================
+function renderMetrics(metrics) {
+  const items = [
+    {lbl:'总收益率', val:formatPct(metrics.totalReturn), cls:pctColor(metrics.totalReturn)},
+    {lbl:'年化收益率', val:formatPct(metrics.annualReturn), cls:pctColor(metrics.annualReturn)},
+    {lbl:'超额收益', val:formatPct(metrics.excessReturn), cls:pctColor(metrics.excessReturn)},
+    {lbl:'最大回撤', val:metrics.maxDD.toFixed(2)+'%', cls:'val-down'},
+    {lbl:'年化波动率', val:metrics.annualVol.toFixed(2)+'%', cls:'val-down'},
+    {lbl:'夏普比率', val:metrics.sharpe.toFixed(2), cls:metrics.sharpe>0?'val-up':'val-down'},
+    {lbl:'卡尔玛比率', val:metrics.calmar.toFixed(2), cls:metrics.calmar>0?'val-up':'val-down'},
+    {lbl:'胜率', val:metrics.winRate.toFixed(1)+'%', cls:metrics.winRate>=50?'val-up':'val-down'},
+    {lbl:'盈亏比', val:metrics.profitFactor===Infinity?'∞':metrics.profitFactor.toFixed(2), cls:'val-up'},
+    {lbl:'交易次数', val:metrics.totalTrades, cls:''},
+    {lbl:'平仓次数', val:metrics.closedTrades, cls:''},
+    {lbl:'最大连盈', val:metrics.maxConsecWins+'次', cls:'val-up'},
+    {lbl:'最大连亏', val:metrics.maxConsecLosses+'次', cls:'val-down'},
+  ];
+
+  document.getElementById('metricsGrid').innerHTML = items.map(i =>
+    `<div class="metric-item"><div class="val ${i.cls}">${i.val}</div><div class="lbl">${i.lbl}</div></div>`
+  ).join('');
+}
+
+function renderTrades(trades) {
+  if (!trades || trades.length === 0) {
+    document.querySelector('#tradeTable tbody').innerHTML =
+      '<tr><td colspan="5" style="text-align:center;color:var(--sub);padding:40px;">暂无交易记录</td></tr>';
+    return;
+  }
+
+  const rows = trades.slice(-50).reverse().map(t => {
+    const pnlClass = t.pnl > 0 ? 'win' : (t.pnl < 0 ? 'loss' : '');
+    const pnlStr = t.pnl === 0 ? '-' : (t.pnl >= 0 ? '+' : '') + t.pnl.toFixed(0) + ' (' + (t.pnlPct||0).toFixed(1) + '%)';
+    return `<tr>
+      <td>${t.date}</td>
+      <td>${t.type}</td>
+      <td>¥${t.price.toFixed(2)}</td>
+      <td>${t.shares}股</td>
+      <td class="${pnlClass}">${pnlStr}</td>
+    </tr>`;
+  });
+
+  document.querySelector('#tradeTable tbody').innerHTML = rows.join('');
+}
+
+// ======================== MAIN ACTIONS ========================
+let currentResult = null;
+
+function selectStock(code, name) {
+  document.getElementById('stockCode').value = name ? `${code} ${name}` : code;
+  document.getElementById('suggestions').style.display = 'none';
+  updateDataStatus(code, null);
+}
+
+async function refreshData() {
+  const raw = document.getElementById('stockCode').value.trim();
+  if (!raw) { showToast('请先输入股票代码', 'error'); return; }
+  const code = raw.split(/\s+/)[0].padStart(6,'0');
+  const tsCode = getTsCode(code);
+
+  showLoading('正在从腾讯财经拉取数据...');
+  try {
+    const result = await DataManager.loadData(code, true);
+    updateDataStatus(code, result);
+    showToast(`数据更新成功！${result.data.length} 条记录，最新: ${result.lastDate}`);
+  } catch(e) {
+    showToast('数据拉取失败: ' + e.message, 'error');
+  }
+  hideLoading();
+}
+
+function updateDataStatus(code, result) {
+  const statusDiv = document.getElementById('dataStatus');
+  const dot = statusDiv.querySelector('.dot');
+  const text = document.getElementById('dataStatusText');
+
+  if (!result) {
+    const tsCode = getTsCode(code);
+    const cached = DataManager.getFromCache(tsCode);
+    if (cached && cached.data && cached.data.length > 50) {
+      dot.className = 'dot dot-fresh';
+      text.textContent = `缓存数据 · ${cached.data.length}条 · 最新: ${cached.lastDate || '?'}`;
+    } else {
+      dot.className = 'dot dot-none';
+      text.textContent = '无缓存 · 请先更新数据';
+    }
+  } else {
+    dot.className = result.cached ? 'dot dot-stale' : 'dot dot-fresh';
+    text.textContent = `${result.cached?'缓存':'最新'} · ${result.data.length}条 · 最新: ${result.lastDate}`;
+  }
+}
+
+async function runBacktest() {
+  const raw = document.getElementById('stockCode').value.trim();
+  if (!raw) { showToast('请先输入股票代码', 'error'); return; }
+
+  const code = raw.split(/\s+/)[0].padStart(6,'0');
+  const system = parseInt(document.getElementById('systemSelect').value);
+  const startDate = document.getElementById('startDate').value;
+  const endDate = document.getElementById('endDate').value;
+  const initialCapital = parseFloat(document.getElementById('initialCapital').value) * 10000;
+  const atrPeriod = parseInt(document.getElementById('atrPeriod').value);
+  const riskPercent = parseFloat(document.getElementById('riskPercent').value);
+  const maxUnits = parseInt(document.getElementById('maxUnits').value);
+  const commission = parseFloat(document.getElementById('commission').value) / 100;
+  const slippage = parseFloat(document.getElementById('slippage').value) / 100;
+
+  const entryPeriod = system === 1 ? 20 : 55;
+  const exitPeriod = system === 1 ? 10 : 20;
+  const addGapATR = 0.5;
+  const stopLossATR = 2.0;
+
+  showLoading('正在加载数据...');
+  try {
+    // Load data
+    const loadResult = await DataManager.loadData(code, false);
+    updateDataStatus(code, loadResult);
+
+    // Filter by date range
+    let allData = loadResult.data;
+    let data = allData.filter(d => d.date >= startDate && d.date <= endDate);
+    if (data.length < 60) {
+      showToast('回测区间数据不足（至少需要60个交易日）', 'error');
+      hideLoading();
+      return;
+    }
+
+    document.getElementById('loadingText').textContent = '正在执行回测...';
+
+    const params = {
+      system, entryPeriod, exitPeriod, atrPeriod,
+      riskPercent, maxUnits, addGapATR, stopLossATR,
+      initialCapital, commission, slippage
+    };
+
+    // Run backtest (use setTimeout to allow UI update)
+    await new Promise(r => setTimeout(r, 50));
+
+    const backtestResult = runTurtleBacktest(data, params);
+    const metrics = calculateMetrics(
+      backtestResult.equity, backtestResult.benchmark,
+      backtestResult.trades, data, params
+    );
+
+    const result = { ...backtestResult, metrics, data, params: { ...params, startIdx: backtestResult.startIdx } };
+    currentResult = result;
+
+    // Render
+    renderEquityChart(result);
+    renderDrawdownChart(result);
+    renderAnnualChart(result);
+    renderMetrics(metrics);
+    renderTrades(backtestResult.trades);
+
+    showToast(`回测完成！总收益 ${formatPct(metrics.totalReturn)} | 夏普 ${metrics.sharpe.toFixed(2)}`, 'success');
+  } catch(e) {
+    showToast('回测失败: ' + e.message, 'error');
+    console.error(e);
+  }
+  hideLoading();
+}
+
+// ======================== STOCK SEARCH ========================
+function setupStockSearch() {
+  const input = document.getElementById('stockCode');
+  const suggBox = document.getElementById('suggestions');
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q || q.length < 1) { suggBox.style.display = 'none'; return; }
+
+    const matches = STOCK_LIST.filter(s =>
+      s.code.includes(q) || s.name.toLowerCase().includes(q)
+    ).slice(0, 8);
+
+    if (matches.length === 0) {
+      // Try to format as a raw code
+      if (/^\d{6}$/.test(q)) {
+        const market = detectMarket(q);
+        suggBox.innerHTML = `<div class="item" data-code="${q}"><span>${q}</span><span class="code">${market.toUpperCase()}</span></div>`;
+        suggBox.style.display = 'block';
+      } else {
+        suggBox.style.display = 'none';
+      }
+      return;
+    }
+
+    suggBox.innerHTML = matches.map(s =>
+      `<div class="item" data-code="${s.code}" data-name="${s.name}">
+        <span>${s.name}</span><span class="code">${s.code} · ${s.market.toUpperCase()}</span>
+      </div>`
+    ).join('');
+    suggBox.style.display = 'block';
+
+    // Click handlers
+    suggBox.querySelectorAll('.item').forEach(el => {
+      el.addEventListener('click', () => {
+        const c = el.dataset.code, n = el.dataset.name;
+        selectStock(c, n);
+      });
+    });
+  });
+
+  // Hide on blur
+  input.addEventListener('blur', () => {
+    setTimeout(() => suggBox.style.display = 'none', 200);
+  });
+}
+
+// ======================== INIT ========================
+document.addEventListener('DOMContentLoaded', () => {
+  initCharts();
+  setupStockSearch();
+  // Default stock
+  selectStock('000001', '平安银行');
+  // Auto-check data status
+  updateDataStatus('000001', null);
+});
+</script>
+</body>
+</html>
