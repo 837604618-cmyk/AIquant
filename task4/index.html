@@ -344,8 +344,7 @@ const MAX_PAGES = 5;
 const MIN_DATE = '2005-01-01';
 
 async function fetchOnePage(mkt, num, startDate, endDate) {
-  const range = startDate ? `${startDate},${endDate || ''}` : '';
-  const url = `${API_BASE}?param=${mkt}${num},day,${range},${PAGE_SIZE},qfq`;
+  const url = `${API_BASE}?param=${mkt}${num},day,${startDate||''},${endDate||''},${PAGE_SIZE},qfq`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const json = await resp.json();
