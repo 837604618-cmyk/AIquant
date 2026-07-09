@@ -449,6 +449,7 @@ function runTurtleBacktest(data, params) {
   let lots = [];
   let equity = [];
   let trades = [];
+  let markers = [];
   let lastBreakoutPnl = null;
   let inBreakout = false;
 
@@ -479,6 +480,7 @@ function runTurtleBacktest(data, params) {
         const pnl = proceeds - l.shares*l.entryPrice*(1+commission);
         cash += proceeds;
         trades.push({date:t.date,type:'止损平仓',price:px,shares:l.shares,pnl,pnlPct:pnl/(l.shares*l.entryPrice*(1+commission))*100});
+        markers.push({date:t.date,type:'sell',price:px,equity:totEq});
       } else { surv.push(l); }
     }
     lots = surv;
@@ -495,6 +497,7 @@ function runTurtleBacktest(data, params) {
           tp+=pnl; cash+=proceeds;
           trades.push({date:t.date,type:'突破退出',price:px,shares:l.shares,pnl,pnlPct:pnl/(l.shares*l.entryPrice*(1+commission))*100});
         }
+        markers.push({date:t.date,type:'sell',price:tc,equity:totEq});
         if(inBreakout){ lastBreakoutPnl=tp; inBreakout=false; }
         lots=[];
       }
@@ -511,7 +514,10 @@ function runTurtleBacktest(data, params) {
     if(lots.length===0){
       if(tc > entryHi){
         let skip = false;
-        if(sys1Filter && lastBreakoutPnl !== null && lastBreakoutPnl > 0) skip = true;
+        if(sys1Filter && lastBreakoutPnl !== null && lastBreakoutPnl > 0){
+          skip = true;
+          lastBreakoutPnl = null; // reset after skip so next breakout is accepted
+        }
         if(!skip){
           let ep = Math.min(tc*(1+slippage), prev.close*1.1);
           const cost = unitSz*ep*(1+commission);
@@ -520,6 +526,7 @@ function runTurtleBacktest(data, params) {
             lots.push({shares:unitSz,entryPrice:ep,entryDate:t.date,stopPrice:sp});
             cash-=cost; inBreakout=true; lastBreakoutPnl=null;
             trades.push({date:t.date,type:'突破买入',price:ep,shares:unitSz,pnl:0,pnlPct:0});
+            markers.push({date:t.date,type:'buy',price:ep,equity:totEq});
           }
         }
       }
@@ -535,13 +542,14 @@ function runTurtleBacktest(data, params) {
             lots.push({shares:unitSz,entryPrice:ep,entryDate:t.date,stopPrice:sp});
             cash-=cost;
             trades.push({date:t.date,type:'金字塔加仓',price:ep,shares:unitSz,pnl:0,pnlPct:0});
+            markers.push({date:t.date,type:'buy',price:ep,equity:totEq});
           }
         }
       }
     }
   }
 
-  return { equity, bench, trades, data, startI };
+  return { equity, bench, trades, markers, data, startI };
 }
 
 // ======================== METRICS ========================
@@ -604,18 +612,61 @@ function initCharts() {
 }
 
 function renderEquity(result) {
-  const {equity,bench,data,metrics,startI}=result;
+  const {equity,bench,data,markers,startI}=result;
   const dates=data.slice(startI).map(d=>d.date);
   const eq=equity.slice(1),bm=bench.slice(1);
+
+  // Build date→index map
+  const dateIdx={};
+  dates.forEach((d,i)=>{dateIdx[d]=i;});
+
+  // Map markers to chart coordinates
+  const buyPoints=[], sellPoints=[];
+  if(markers){
+    // Only show first buy and last sell per cycle to reduce clutter
+    let lastBuyDate=null, lastSellType=null;
+    markers.forEach(m=>{
+      const idx=dateIdx[m.date];
+      if(idx===undefined) return;
+      const eqVal=equity[idx+1]; // equity is one element ahead
+      if(m.type==='buy'){
+        if(lastBuyDate!==m.date){ // avoid duplicates
+          buyPoints.push({value:[idx,eqVal],date:m.date,price:m.price});
+          lastBuyDate=m.date;
+        }
+      }else{
+        if(lastSellType!==m.date){
+          sellPoints.push({value:[idx,eqVal],date:m.date,price:m.price});
+          lastSellType=m.date;
+        }
+      }
+    });
+  }
+
   ecEquity.setOption({
-    tooltip:{trigger:'axis',formatter:p=>{let s=p[0].axisValue+'<br/>';p.forEach(x=>{const ret=((x.value-equity[0])/equity[0]*100).toFixed(2);s+=`${x.marker} ${x.seriesName}: ¥${x.value.toFixed(0)} (${ret}%)<br/>`;});return s;}},
-    legend:{data:['策略权益','买入持有'],top:3,textStyle:{fontSize:11}},
+    tooltip:{trigger:'axis',formatter:p=>{
+      if(!p||!p.length) return '';
+      let s=p[0].axisValue+'<br/>';
+      p.forEach(x=>{
+        if(x.seriesName==='买入'||x.seriesName==='卖出'){
+          const d=x.data||{};
+          s+=`${x.marker} ${x.seriesName}: ¥${d.price||''}<br/>`;
+        }else{
+          const ret=((x.value-equity[0])/equity[0]*100).toFixed(2);
+          s+=`${x.marker} ${x.seriesName}: ¥${x.value.toFixed(0)} (${ret}%)<br/>`;
+        }
+      });
+      return s;
+    }},
+    legend:{data:['策略权益','买入持有','买入','卖出'],top:3,textStyle:{fontSize:11}},
     grid:{left:60,right:35,top:35,bottom:25},
     xAxis:{type:'category',data:dates,axisLabel:{fontSize:9,rotate:25,formatter:v=>v.slice(0,7)}},
     yAxis:{type:'value',axisLabel:{fontSize:9,formatter:v=>(v/10000).toFixed(0)+'万'}},
     series:[
-      {name:'策略权益',type:'line',data:eq,smooth:true,lineStyle:{color:'#e74c3c',width:2},itemStyle:{color:'#e74c3c'},symbol:'none'},
-      {name:'买入持有',type:'line',data:bm,smooth:true,lineStyle:{color:'#95a5a6',width:1.5,type:'dashed'},symbol:'none'}
+      {name:'策略权益',type:'line',data:eq,smooth:true,lineStyle:{color:'#e74c3c',width:2},symbol:'none',z:1},
+      {name:'买入持有',type:'line',data:bm,smooth:true,lineStyle:{color:'#95a5a6',width:1.5,type:'dashed'},symbol:'none',z:1},
+      {name:'买入',type:'scatter',data:buyPoints,symbol:'triangle',symbolSize:10,itemStyle:{color:'#e74c3c'},z:2},
+      {name:'卖出',type:'scatter',data:sellPoints,symbol:'triangle',symbolSize:10,symbolRotate:180,itemStyle:{color:'#27ae60'},z:2}
     ]
   },true);
 }
