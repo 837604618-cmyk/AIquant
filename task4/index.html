@@ -223,16 +223,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
   <!-- CENTER: Charts -->
   <div class="chart-area" id="chartArea">
     <div class="chart-box">
+      <div class="title">📊 K线图 — 买卖点标记</div>
+      <div class="chart-container" id="chartKline"></div>
+    </div>
+    <div class="chart-box">
       <div class="title">📈 权益曲线 — 策略 vs 买入持有</div>
-      <div class="chart-container" id="chartEquity"></div>
+      <div class="chart-container-sm" id="chartEquity"></div>
     </div>
     <div class="chart-box">
       <div class="title">📉 回撤曲线</div>
       <div class="chart-container-sm" id="chartDrawdown"></div>
-    </div>
-    <div class="chart-box">
-      <div class="title">📊 年度收益对比</div>
-      <div class="chart-container-sm" id="chartAnnual"></div>
     </div>
   </div>
 
@@ -602,13 +602,13 @@ function calcMetrics(equity, bench, trades, data, startI) {
 }
 
 // ======================== CHARTS ========================
-let ecEquity, ecDD, ecAnnual;
+let ecEquity, ecDD, ecKline;
 
 function initCharts() {
+  ecKline = echarts.init(document.getElementById('chartKline'));
   ecEquity = echarts.init(document.getElementById('chartEquity'));
   ecDD = echarts.init(document.getElementById('chartDrawdown'));
-  ecAnnual = echarts.init(document.getElementById('chartAnnual'));
-  window.addEventListener('resize',()=>{ecEquity?.resize();ecDD?.resize();ecAnnual?.resize();});
+  window.addEventListener('resize',()=>{ecKline?.resize();ecEquity?.resize();ecDD?.resize();});
 }
 
 function renderEquity(result) {
@@ -688,31 +688,79 @@ function renderDD(result) {
   },true);
 }
 
-function renderAnnual(result) {
-  const {equity,bench,data,startI}=result;
-  const dates=data.slice(startI).map(d=>d.date);
-  const ann={};
-  for(let i=0;i<dates.length;i++){
-    const y=dates[i].slice(0,4);
-    if(!ann[y])ann[y]={sS:0,sE:0,bS:0,bE:0,c:0};
-    if(ann[y].c===0){ann[y].sS=i>0?equity[i]:equity[0];ann[y].bS=i>0?bench[i]:bench[0];}
-    ann[y].sE=equity[i+1]||equity[i];ann[y].bE=bench[i+1]||bench[i];ann[y].c++;
+function renderKline(result) {
+  const {data,markers,startI}=result;
+  const sliced=data.slice(startI);
+  const dates=sliced.map(d=>d.date);
+  const ohlc=sliced.map(d=>[d.open,d.close,d.low,d.high]); // ECharts candlestick format
+  const volumes=sliced.map(d=>d.volume);
+
+  // Date→index map
+  const dateIdx={};
+  dates.forEach((d,i)=>{dateIdx[d]=i;});
+
+  // Map markers
+  const buys=[], sells=[];
+  if(markers){
+    markers.forEach(m=>{
+      const idx=dateIdx[m.date];
+      if(idx===undefined) return;
+      if(m.type==='buy') buys.push({value:[idx,m.price],date:m.date,price:m.price});
+      else sells.push({value:[idx,m.price],date:m.date,price:m.price});
+    });
   }
-  const yrs=Object.keys(ann).sort();
-  const sR=yrs.map(y=>ann[y].sS>0?(ann[y].sE-ann[y].sS)/ann[y].sS*100:0);
-  const bR=yrs.map(y=>ann[y].bS>0?(ann[y].bE-ann[y].bS)/ann[y].bS*100:0);
-  ecAnnual.setOption({
-    tooltip:{trigger:'axis'},
-    legend:{data:['策略','买入持有'],top:3,textStyle:{fontSize:11}},
-    grid:{left:45,right:15,top:35,bottom:25},
-    xAxis:{type:'category',data:yrs,axisLabel:{fontSize:10}},
-    yAxis:{type:'value',axisLabel:{fontSize:9,formatter:v=>v+'%'}},
+
+  // Calculate MA lines
+  const calcMA=(arr,period)=>{
+    const r=[]; let s=0;
+    for(let i=0;i<arr.length;i++){s+=arr[i];if(i>=period)s-=arr[i-period];r.push(i>=period-1?s/period:null);}
+    return r;
+  };
+  const closes=sliced.map(d=>d.close);
+  const ma10=calcMA(closes,10),ma30=calcMA(closes,30);
+
+  ecKline.setOption({
+    tooltip:{trigger:'axis',axisPointer:{type:'cross'},
+      formatter:p=>{
+        if(!p||!p.length)return'';
+        const d=p.find(x=>x.seriesName==='K线');
+        if(!d)return'';
+        const v=d.data,idx=d.dataIndex;
+        let s=`${dates[idx]}<br/>开: ${v[1]} 收: ${v[2]} 高: ${v[4]} 低: ${v[3]}<br/>`;
+        p.forEach(x=>{
+          if(x.seriesName==='买入')s+=`${x.marker} 买入 ¥${x.value[1]}<br/>`;
+          else if(x.seriesName==='卖出')s+=`${x.marker} 卖出 ¥${x.value[1]}<br/>`;
+          else if(x.seriesName==='MA10'){if(x.value!=null)s+=`${x.marker} MA10: ¥${x.value.toFixed(2)}<br/>`;}
+          else if(x.seriesName==='MA30'){if(x.value!=null)s+=`${x.marker} MA30: ¥${x.value.toFixed(2)}<br/>`;}
+        });
+        return s;
+      }
+    },
+    legend:{data:['K线','MA10','MA30','买入','卖出'],top:3,textStyle:{fontSize:11}},
+    grid:[{left:60,right:60,top:35,height:'68%'},{left:60,right:60,top:'80%',height:'15%'}],
+    xAxis:[
+      {type:'category',data:dates,axisLabel:{fontSize:9,rotate:25,formatter:v=>v.slice(0,7)},gridIndex:0},
+      {type:'category',data:dates,axisLabel:{show:false},gridIndex:1}
+    ],
+    yAxis:[
+      {type:'value',scale:true,axisLabel:{fontSize:9},splitLine:{lineStyle:{color:'#f0f0f0'}},gridIndex:0},
+      {type:'value',axisLabel:{fontSize:8,formatter:v=>(v/10000).toFixed(0)+'万'},gridIndex:1}
+    ],
     series:[
-      {name:'策略',type:'bar',data:sR,itemStyle:{color:p=>p.value>=0?'#e74c3c':'#27ae60'},barMaxWidth:18},
-      {name:'买入持有',type:'bar',data:bR,itemStyle:{color:p=>p.value>=0?'#fab1a0':'#55efc4'},barMaxWidth:18}
+      {name:'K线',type:'candlestick',data:ohlc,
+        itemStyle:{color:'#e74c3c',color0:'#27ae60',borderColor:'#e74c3c',borderColor0:'#27ae60'},
+        xAxisIndex:0,yAxisIndex:0,z:1},
+      {name:'MA10',type:'line',data:ma10,smooth:true,lineStyle:{color:'#f39c12',width:1},symbol:'none',xAxisIndex:0,yAxisIndex:0,z:2},
+      {name:'MA30',type:'line',data:ma30,smooth:true,lineStyle:{color:'#3498db',width:1},symbol:'none',xAxisIndex:0,yAxisIndex:0,z:2},
+      {name:'买入',type:'scatter',data:buys,symbol:'triangle',symbolSize:14,itemStyle:{color:'#e74c3c'},xAxisIndex:0,yAxisIndex:0,z:3},
+      {name:'卖出',type:'scatter',data:sells,symbol:'triangle',symbolSize:14,symbolRotate:180,itemStyle:{color:'#27ae60'},xAxisIndex:0,yAxisIndex:0,z:3},
+      {name:'成交量',type:'bar',data:volumes,
+        itemStyle:{color:p=>sliced[p.dataIndex].close>=sliced[p.dataIndex].open?'rgba(231,76,60,0.35)':'rgba(39,174,96,0.35)'},
+        xAxisIndex:1,yAxisIndex:1,z:0}
     ]
   },true);
 }
+
 
 // ======================== UI RENDER ========================
 function renderMetrics(m) {
@@ -796,9 +844,9 @@ async function runBacktest() {
     const result = { ...btResult, metrics, data, startI: btResult.startI };
     currentResult = result;
 
+    renderKline(result);
     renderEquity(result);
     renderDD(result);
-    renderAnnual(result);
     renderMetrics(metrics);
     renderTrades(btResult.trades);
 
