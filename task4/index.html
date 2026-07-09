@@ -40,6 +40,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 .preset-stocks button { padding:4px 8px; border:1px solid var(--border); border-radius:4px; background:#fff; font-size:11px; cursor:pointer; white-space:nowrap; transition:all .15s; }
 .preset-stocks button:hover { border-color: var(--blue); color: var(--blue); background: #eef5ff; }
 
+.stock-name-display { display:flex; align-items:center; gap:6px; margin-top:8px; padding:8px 10px; background:#f0f7ff; border-radius:6px; border:1px solid #cce0ff; }
+.stock-name-icon { font-size:14px; }
+.stock-name-text { font-weight:700; font-size:14px; color:#1a1a2e; }
+.stock-name-code { font-size:11px; color:var(--sub); }
+
 .row-2 { display:grid; grid-template-columns: 1fr 1fr; gap:6px; }
 .row-3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; }
 .section-divider { border-top: 1px solid var(--border); margin: 10px 0; padding-top: 8px; }
@@ -127,6 +132,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
         <button onclick="selectStock('600036','招商银行')">600036</button>
         <button onclick="selectStock('002594','比亚迪')">002594</button>
         <button onclick="selectStock('600900','长江电力')">600900</button>
+      </div>
+      <div class="stock-name-display" id="stockNameDisplay" style="display:none">
+        <span class="stock-name-icon">📌</span>
+        <span class="stock-name-text" id="stockNameText"></span>
+        <span class="stock-name-code" id="stockNameCode"></span>
       </div>
     </div>
 
@@ -798,10 +808,22 @@ function renderTrades(trades) {
 // ======================== MAIN ========================
 let currentResult=null, currentStockName='';
 
+function showStockName(name, code) {
+  const el = document.getElementById('stockNameDisplay');
+  if (name) {
+    el.style.display = 'flex';
+    document.getElementById('stockNameText').textContent = name;
+    document.getElementById('stockNameCode').textContent = String(code).padStart(6,'0');
+  } else {
+    el.style.display = 'none';
+  }
+}
+
 function selectStock(code, name) {
   document.getElementById('stockCode').value = name ? `${code} ${name}` : code;
   document.getElementById('suggestions').style.display = 'none';
   currentStockName = name || '';
+  showStockName(name, code);
 }
 
 async function runBacktest() {
@@ -830,7 +852,10 @@ async function runBacktest() {
     // Fetch data directly (no cache)
     const fetchResult = await fetchStockData(code);
     let allData = fetchResult.data;
-    showToast(`数据拉取成功 · ${fetchResult.name || code} · ${allData.length}条 · 最新${fetchResult.lastDate}`, 'success');
+    // Show stock name from API
+    const stockName = fetchResult.name || '';
+    if (stockName) showStockName(stockName, code);
+    showToast(`数据拉取成功 · ${stockName || code} · ${allData.length}条 · 最新${fetchResult.lastDate}`, 'success');
 
     // Filter by date range
     let data = allData.filter(d => d.date >= params.startDate && d.date <= params.endDate);
